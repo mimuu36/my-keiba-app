@@ -20,14 +20,13 @@ def check_password():
         return False
     elif not st.session_state["password_correct"]:
         st.text_input("パスワード入力", type="password", on_change=password_entered, key="password")
-        st.error("😕 認証失敗")
+        st.error("認証失敗")
         return False
     return True
 
 if not check_password():
     st.stop()
 
-# --- 🐎 アプリ設定 ---
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 DB_FILE = 'keiba_data.db'
 
@@ -38,11 +37,11 @@ def get_real_columns():
     conn.close()
     d_col = next((c for c in cols if "日" in c or "date" in c.lower()), "日付")
     m_col = next((c for c in cols if "月" in c or "month" in c.lower()), "月")
-    t_col = next((c for c in cols if "時" in c or "time" in c.lower()), "時間")
+    r_col = next((c for c in cols if "R" in c or "レース" in c or "Race" in c), "R")
     c_col = next((c for c in cols if "条件" in c or "クラス" in c or "class" in c.lower()), "条件")
-    return d_col, m_col, t_col, c_col
+    return d_col, m_col, r_col, c_col
 
-d_col, m_col, t_col, c_col = get_real_columns()
+d_col, m_col, r_col, c_col = get_real_columns()
 
 # --- 👈 左側：サイドバー ---
 st.sidebar.title("🎮 操作パネル")
@@ -64,13 +63,27 @@ else:
     start_year = current_year - years_back
     filter_query = f"AND {d_col} >= '{start_year}-01-01' AND {m_col} IN ({m_dict[season]})"
 
-# 2. レース条件 (クラス指定を追加！)
+# 2. レース条件 (ここを修正！)
 st.sidebar.header("2. レース条件")
 baba = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 2400], index=2)
-
-# クラス（条件）の絞り込み
 race_class = st.sidebar.selectbox("レースクラス", ["全クラス", "新馬・未勝利", "1勝クラス", "2勝・3勝クラス", "オープン・重賞"])
+
+# 時間帯 or レース番号 の選択
+time_mode = st.sidebar.radio("時間の指定方法", ["時間帯で選ぶ", "レース番号で選ぶ"])
+
+time_sql = ""
+if time_mode == "時間帯で選ぶ":
+    tz = st.sidebar.selectbox("時間帯区分", ["全レース", "午前 (1R～4R)", "午後 (5R～12R)"])
+    if tz == "午前 (1R～4R)":
+        time_sql = f"AND CAST({r_col} AS INTEGER) <= 4"
+    elif tz == "午後 (5R～12R)":
+        time_sql = f"AND CAST({r_col} AS INTEGER) >= 5"
+else:
+    target_r = st.sidebar.number_input("レース番号(R)", 1, 12, 11)
+    time_sql = f"AND CAST({r_col} AS INTEGER) = {target_r}"
+
+# クラスSQL組み立て
 class_sql = ""
 if race_class == "新馬・未勝利":
     class_sql = f"AND ({c_col} LIKE '%新馬%' OR {c_col} LIKE '%未勝利%')"
@@ -80,14 +93,6 @@ elif race_class == "2勝・3勝クラス":
     class_sql = f"AND ({c_col} LIKE '%2勝%' OR {c_col} LIKE '%3勝%')"
 elif race_class == "オープン・重賞":
     class_sql = f"AND ({c_col} LIKE '%オープン%' OR {c_col} LIKE '%G1%' OR {c_col} LIKE '%G2%' OR {c_col} LIKE '%G3%' OR {c_col} LIKE '%L%')"
-
-# 時間帯
-time_zone = st.sidebar.selectbox("時間帯", ["全時間帯", "午前 (1R-6R付近)", "午後 (7R-12R付近)"])
-time_sql = ""
-if time_zone == "午前 (1R-6R付近)":
-    time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) < 13)"
-elif time_zone == "午後 (7R-12R付近)":
-    time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) >= 13)"
 
 if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
@@ -110,7 +115,7 @@ def load_filtered_data(baba_val, dist_val, extra_sql, t_sql, c_sql):
     finally:
         conn.close()
 
-# --- 👉 右側：メインエリア ---
+# --- 👉 右側表示エリア ---
 if "mode" not in st.session_state:
     st.info("👈 左側のボタンを押すと、分析結果が表示されます。")
     st.stop()
