@@ -7,7 +7,7 @@ import japanize_matplotlib
 from datetime import date
 import os
 
-# --- 🔒 認証機能 ---
+# --- 🔒 認証機能 (維持) ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["MY_PASSWORD"]:
@@ -33,6 +33,7 @@ DB_FILE = 'keiba_data.db'
 # --- 👈 左側：操作パネル (完全固定) ---
 st.sidebar.title("🎮 操作パネル")
 
+# 1. 過去データの参照範囲
 st.sidebar.header("1. 過去データの参照範囲")
 range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節で指定"])
 
@@ -49,6 +50,7 @@ else:
     start_year_2digit = 26 - years_back
     filter_query = f"AND 年 >= {start_year_2digit} AND 月 IN ({m_dict[season]})"
 
+# 2. レース条件
 st.sidebar.header("2. レース条件")
 baba_input = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 baba_val = "ダ" if baba_input == "ダート" else "芝"
@@ -81,7 +83,12 @@ if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
 
 st.sidebar.markdown("---")
+
+# 3. 気になる馬情報 (ここを実装！)
 st.sidebar.header("3. 気になる馬情報")
+target_horse_num = st.sidebar.number_input("気になる馬の馬番", 1, 18, 1)
+highlight_on = st.sidebar.toggle("強調表示をONにする", value=False)
+
 st.sidebar.header("4. 期待値シミュレーター")
 
 # --- 🔍 統計計算関数 ---
@@ -125,20 +132,33 @@ if df.empty:
 
 st.title(f"🚀 期待値分析（{len(df)}件）")
 
+# 強調表示用のカラーパレット作成
+def get_palette(data, col_name, target_val, base_palette):
+    if not highlight_on:
+        return base_palette
+    return ['#FF4B4B' if val == target_val else '#CCCCCC' for val in data[col_name]]
+
 tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
 with tab1:
     st.subheader("馬番別：複勝期待値（3着内率）")
     s1 = calc_stats(df, '馬番')
-    # 全体の複勝率をラインで表示して、平均より高いか低いかを見やすくする
     avg_fukusho = (df['確定着順'] <= 3).mean() * 100
+    
+    # 馬番別の色は、強調ONなら対象馬番だけ赤くする
+    pal1 = ['#FF4B4B' if x == target_horse_num and highlight_on else '#5DADE2' for x in s1['馬番']]
+    
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette="coolwarm")
+    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=pal1)
     ax.axhline(avg_fukusho, color='blue', linestyle='--', label='全体平均')
     ax.set_ylabel("複勝率 (%)")
     add_labels(ax)
     st.pyplot(fig)
-    st.write(f"💡 全体平均複勝率: {avg_fukusho:.1f}% より高い馬番が、そのコースの有利な枠順です。")
+    
+    if highlight_on:
+        target_stat = s1[s1['馬番'] == target_horse_num]
+        if not target_stat.empty:
+            st.info(f"🐎 指定した馬番 {target_horse_num} の複勝率は **{target_stat['複勝率'].values[0]}%** です（全体平均: {avg_fukusho:.1f}%）")
 
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
