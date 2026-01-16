@@ -4,9 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import japanize_matplotlib
-from datetime import date
+from datetime import date, datetime
 
-# --- 🔒 認証機能 ---
+# --- 🔒 認証機能 (維持) ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["MY_PASSWORD"]:
@@ -41,7 +41,7 @@ def get_col_names():
 st.sidebar.title("🎮 操作パネル")
 cols = get_col_names()
 
-# 実際の列名を特定する（日付、年月日、date などから探す）
+# 実際の列名を特定
 date_col = next((c for c in cols if c in ['日付', '年月日', 'date', 'Date']), cols[0])
 month_col = next((c for c in cols if c in ['月', 'month', 'Month']), None)
 
@@ -55,10 +55,18 @@ if range_type == "日付範囲で指定":
     end_date = st.sidebar.date_input("終了日", date(2025, 12, 31))
     filter_query = f"AND {date_col} >= '{start_date}' AND {date_col} <= '{end_date}'"
 else:
+    # 季節指定のフル仕様
     season = st.sidebar.selectbox("対象シーズン", ["春 (4-6月)", "秋 (10-11月)", "冬 (1-2月)"])
+    years_back = st.sidebar.slider("過去何年分を対象にするか", 1, 10, 5)
+    
     m_dict = {"冬 (1-2月)": "1,2", "春 (4-6月)": "4,5,6", "秋 (10-11月)": "10,11"}
+    
+    # 現在の年から遡って日付条件を作る
+    current_year = datetime.now().year
+    start_year = current_year - years_back
+    
     if month_col:
-        filter_query = f"AND {month_col} IN ({m_dict[season]})"
+        filter_query = f"AND {date_col} >= '{start_year}-01-01' AND {month_col} IN ({m_dict[season]})"
 
 # 2. レース条件
 st.sidebar.header("2. レース条件")
@@ -79,7 +87,7 @@ def load_filtered_data(baba_val, dist_val, extra_sql):
     try:
         df = pd.read_sql(query, conn)
     except Exception as e:
-        st.error(f"SQLエラーが発生しました。列名を確認してください: {e}")
+        st.error(f"エラー: {e}")
         df = pd.DataFrame()
     finally:
         conn.close()
@@ -93,7 +101,7 @@ if "mode" not in st.session_state:
 df = load_filtered_data(baba, dist, filter_query)
 
 if not df.empty:
-    st.success(f"✅ {len(df)}件のデータを抽出しました")
+    st.success(f"✅ {len(df)}件のデータを抽出しました（{range_type}）")
     st.dataframe(df.head(50))
 else:
     st.warning("⚠️ 条件に合うデータが0件です。")
