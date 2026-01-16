@@ -132,30 +132,26 @@ with tab1:
     s1 = calc_stats(df, '馬番')
     avg_fukusho = (df['確定着順'] <= 3).mean() * 100
     
-    # --- 🎨 期待値条件による色分け ---
-    high_cmap = mcolors.LinearSegmentedColormap.from_list("high", ["#F1C40F", "#E67E22", "#E74C3C"]) # 黄 -> 橙 -> 赤
-    
+    # --- 🎨 厳選グラデーションロジック ---
+    # 平均+5%以上なら赤系へ、平均に近いなら黄色、平均以下は青
     colors = []
     if highlight_on:
-        colors = ['#E74C3C' if x == target_horse_num else '#DCDCDC' for x in s1['馬番']]
+        colors = ['#FF4B4B' if x == target_horse_num else '#E5E7E9' for x in s1['馬番']]
     else:
-        # 平均以上のデータの中での正規化用
-        high_vals = s1[s1['複勝率'] >= avg_fukusho]['複勝率']
-        v_min = high_vals.min() if not high_vals.empty else avg_fukusho
-        v_max = high_vals.max() if not high_vals.empty else avg_fukusho + 1
-
+        v_max = s1['複勝率'].max()
         for val in s1['複勝率']:
-            if val >= avg_fukusho:
-                # 平均以上のものはグラデーション
-                ratio = (val - v_min) / (v_max - v_min) if v_max != v_min else 1.0
-                colors.append(high_cmap(ratio))
+            if val > avg_fukusho:
+                # 平均を超えている場合、その「超え具合」で色を変える
+                diff_ratio = (val - avg_fukusho) / (v_max - avg_fukusho) if v_max != avg_fukusho else 1.0
+                if diff_ratio > 0.6: colors.append("#E74C3C") # 濃い赤（特注）
+                elif diff_ratio > 0.3: colors.append("#E67E22") # オレンジ（狙い）
+                else: colors.append("#F1C40F") # 黄色（検討）
             else:
-                # 平均以下のものは一律で青
-                colors.append("#3498DB")
+                colors.append("#3498DB") # 平均以下は一律青
 
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors)
-    ax.axhline(avg_fukusho, color='blue', linestyle='--', label='全体平均')
+    ax.axhline(avg_fukusho, color='blue', linestyle='--', label='全体平均', alpha=0.7)
     ax.set_ylabel("複勝率 (%)")
     add_labels_inside(ax)
     st.pyplot(fig)
@@ -163,6 +159,7 @@ with tab1:
     target_row = s1.sort_values('複勝率', ascending=False).iloc[0]
     st.markdown(f"💡 **この条件だと {int(target_row['馬番'])}番（{target_row['複勝率']}%）が狙い！** (全体平均: {avg_fukusho:.1f}%)")
 
+# (他タブの騎手・人気・父馬は前回の「見た目変えない」ルールを維持して継続)
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
     s2 = calc_stats(df, '騎手')
@@ -195,4 +192,3 @@ with tab4:
     add_labels_inside(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
-    
