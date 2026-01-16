@@ -4,7 +4,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import japanize_matplotlib
-from datetime import date, datetime
+from datetime import date
+import os
 
 # --- 🔒 認証機能 ---
 def check_password():
@@ -29,12 +30,26 @@ if not check_password():
 # --- 🐎 アプリ設定 ---
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 
+# DBファイルの存在確認
+DB_FILE = 'keiba_data.db'
+if not os.path.exists(DB_FILE):
+    st.error(f"🚨 エラー: {DB_FILE} が見つかりません。GitHubにファイルをプッシュしたか確認してください。")
+    st.stop()
+
 def get_col_names():
-    conn = sqlite3.connect('keiba_data.db')
-    cursor = conn.execute("SELECT * FROM race_results LIMIT 1")
-    cols = [description[0] for description in cursor.description]
-    conn.close()
-    return cols
+    conn = sqlite3.connect(DB_FILE)
+    # テーブル名が正しいか確認しながら取得
+    try:
+        cursor = conn.execute("SELECT * FROM race_results LIMIT 1")
+        cols = [description[0] for description in cursor.description]
+        return cols
+    except:
+        # テーブル名が違う可能性を考慮してテーブル一覧を出す
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table';").fetchall()
+        st.error(f"テーブルが見つかりません。存在するテーブル: {tables}")
+        st.stop()
+    finally:
+        conn.close()
 
 # --- 👈 左側：サイドバー ---
 st.sidebar.title("🎮 操作パネル")
@@ -49,20 +64,15 @@ range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節�
 
 filter_query = ""
 if range_type == "日付範囲で指定":
-    # 2020年（元データの開始）から設定
     start_date = st.sidebar.date_input("開始日", date(2020, 1, 1))
     end_date = st.sidebar.date_input("終了日", date(2025, 12, 31))
     filter_query = f"AND {date_col} >= '{start_date}' AND {date_col} <= '{end_date}'"
 else:
     season = st.sidebar.selectbox("対象シーズン", ["春 (4-6月)", "秋 (10-11月)", "冬 (1-2月)"])
-    # 2020-2025年なので、遡り最大は6年に修正
     years_back = st.sidebar.slider("過去何年分を対象にするか", 1, 6, 3)
-    
     m_dict = {"冬 (1-2月)": "1,2", "春 (4-6月)": "4,5,6", "秋 (10-11月)": "10,11"}
-    # 2026年1月現在から計算
     current_year = 2026 
     start_year = current_year - years_back
-    
     if month_col:
         filter_query = f"AND {date_col} >= '{start_year}-01-01' AND {month_col} IN ({m_dict[season]})"
 
@@ -80,15 +90,10 @@ st.sidebar.header("4. 期待値シミュレーター")
 
 # --- データ読み込み関数 ---
 def load_filtered_data(baba_val, dist_val, extra_sql):
-    conn = sqlite3.connect('keiba_data.db')
+    conn = sqlite3.connect(DB_FILE)
     query = f"SELECT * FROM race_results WHERE 場所='東京' AND 馬場 LIKE '{baba_val}%' AND 距離={dist_val} {extra_sql}"
-    try:
-        df = pd.read_sql(query, conn)
-    except Exception as e:
-        st.error(f"エラー: {e}")
-        df = pd.DataFrame()
-    finally:
-        conn.close()
+    df = pd.read_sql(query, conn)
+    conn.close()
     return df
 
 # --- 👉 右側：メイン表示エリア ---
@@ -97,9 +102,5 @@ if "mode" not in st.session_state:
     st.stop()
 
 df = load_filtered_data(baba, dist, filter_query)
-
-if not df.empty:
-    st.success(f"✅ {len(df)}件のデータを抽出しました")
-    st.dataframe(df.head(50))
-else:
-    st.warning("⚠️ 条件に合うデータが0件です。")
+st.success(f"✅ {len(df)}件のデータを抽出しました")
+st.dataframe(df.head(50))
