@@ -32,22 +32,23 @@ st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 # --- 👈 左側：サイドバー（操作パネル） ---
 st.sidebar.title("🎮 操作パネル")
 
-# 1. 過去データの参照範囲 (ここを修正)
+# 1. 過去データの参照範囲 (順番を「日付」→「季節」に修正)
 st.sidebar.header("1. 過去データの参照範囲")
-range_type = st.sidebar.radio("指定方法", ["季節で指定", "日付範囲で指定"])
+range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節で指定"])
 
 months_query = ""
-if range_type == "季節で指定":
+if range_type == "日付範囲で指定":
+    # 日付指定をデフォルトかつ最初に配置
+    start_date = st.sidebar.date_input("開始日", date(2020, 1, 1))
+    end_date = st.sidebar.date_input("終了日", date(2025, 12, 31))
+    months_query = f"AND 日付 BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'"
+else:
+    # 季節指定を二番目に配置
     season = st.sidebar.selectbox("対象シーズン", ["春 (4-6月)", "秋 (10-11月)", "冬 (1-2月)"])
     m_dict = {"冬 (1-2月)": "1,2", "春 (4-6月)": "4,5,6", "秋 (10-11月)": "10,11"}
     months_query = f"AND 月 IN ({m_dict[season]})"
-else:
-    start_date = st.sidebar.date_input("開始日", date(2020, 1, 1))
-    end_date = st.sidebar.date_input("終了日", date(2025, 12, 31))
-    # 日付指定の場合はSQLのWHERE句を日付用に作る
-    months_query = f"AND 日付 BETWEEN '{start_date.strftime('%Y-%m-%d')}' AND '{end_date.strftime('%Y-%m-%d')}'"
 
-# 2. レース条件 (見出しのみ維持)
+# 2. レース条件
 st.sidebar.header("2. レース条件")
 baba = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 2400], index=2)
@@ -55,10 +56,14 @@ dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 24
 if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
 
+# 3. 以降（枠組みだけ維持）
+st.sidebar.markdown("---")
+st.sidebar.header("3. 気になる馬情報")
+st.sidebar.header("4. 期待値シミュレーター")
+
 # --- データ読み込み関数 ---
 def load_filtered_data(baba, dist, extra_query):
     conn = sqlite3.connect('keiba_data.db')
-    # extra_queryに日付または季節の条件が入る
     query = f"SELECT * FROM race_results WHERE 場所='東京' AND 馬場 LIKE '{baba}%' AND 距離={dist} {extra_query}"
     df = pd.read_sql(query, conn)
     conn.close()
