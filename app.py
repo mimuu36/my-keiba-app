@@ -10,7 +10,7 @@ import matplotlib.colors as mcolors
 import matplotlib.patheffects as path_effects
 from matplotlib.ticker import MaxNLocator
 
-# --- 🔒 認証機能 (維持) ---
+# --- 🔒 認証機能 ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["MY_PASSWORD"]:
@@ -134,8 +134,7 @@ if df.empty:
 st.title(f"🚀 期待値分析（{len(df)}件）")
 tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
-# (tab1, tab2 は維持のため中略するが、実際には全行書く)
-# --- tab1: 馬番 --- (省略せず記載)
+# tab1, tab2 描画（内容は維持）
 with tab1:
     st.subheader("馬番期待値")
     s1 = calc_stats(df, '馬番')
@@ -156,7 +155,6 @@ with tab1:
         st.pyplot(fig)
     else: st.write("データなし")
 
-# --- tab2: 騎手 --- (省略せず記載)
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
     s2_all = calc_stats(df, '騎手')
@@ -172,7 +170,7 @@ with tab2:
         st.pyplot(fig)
     else: st.info("出走回数5回以上の騎手データなし")
 
-# --- tab3: 人気 (今回の大規模修正) ---
+# --- tab3: 人気 & 波乱度 (定義テーブル追加) ---
 with tab3:
     st.subheader("人気別：複勝率（信頼度）")
     s3 = calc_stats(df, '人気')
@@ -191,37 +189,40 @@ with tab3:
     st.markdown("---")
     st.subheader("📉 レース波乱度分布（決着パターン）")
     
-    # 波乱度計算ロジック
+    # 波乱度計算
     race_results = df[df['確定着順'] <= 3].copy()
-    # レースごとに人気のリストを作る
     r_groups = race_results.groupby(['年','月','日','レース番号'])['人気'].apply(list)
-    
     dist_counts = {"人気決着": 0, "上位決着": 0, "穴注意": 0, "大波乱!!": 0}
     for ranks in r_groups:
         if len(ranks) < 3: continue
         ranks.sort()
         r1, r2, r3 = ranks[0], ranks[1], ranks[2]
-        
         if r3 <= 3: dist_counts["人気決着"] += 1
         elif r3 <= 6: dist_counts["上位決着"] += 1
         elif r2 <= 5 and r3 >= 6: dist_counts["穴注意"] += 1
         else: dist_counts["大波乱!!"] += 1
     
-    labels = list(dist_counts.keys())
-    values = list(dist_counts.values())
-    
-    if sum(values) > 0:
-        fig2, ax2 = plt.subplots(figsize=(8, 5))
+    if sum(dist_counts.values()) > 0:
+        fig2, ax2 = plt.subplots(figsize=(8, 4))
         colors_pie = ["#2ECC71", "#3498DB", "#F1C40F", "#E74C3C"]
-        ax2.pie(values, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors_pie, 
-                wedgeprops={'edgecolor': 'white', 'linewidth': 2}, textprops={'fontweight': 'bold'})
+        ax2.pie(list(dist_counts.values()), labels=list(dist_counts.keys()), autopct='%1.1f%%', startangle=90, colors=colors_pie, wedgeprops={'edgecolor': 'white', 'linewidth': 2}, textprops={'fontweight': 'bold'})
         ax2.axis('equal') 
         st.pyplot(fig2)
-        st.info(f"💡 分析対象レース数: {sum(values)}レース")
+
+        # 🛠️ 区分定義の補足テーブル
+        st.markdown("#### 📝 区分定義（1着〜3着の顔ぶれ）")
+        st.table(pd.DataFrame({
+            "区分": ["人気決着", "上位決着", "穴注意", "大波乱!!"],
+            "内容": [
+                "3頭とも1〜3番人気以内",
+                "3頭とも1〜6番人気以内（人気決着は除く）",
+                "1〜5番人気が2頭 ＋ 6番人気以下が1頭",
+                "6番人気以下が2頭以上、または1〜5番人気が1頭以下"
+            ]
+        }))
     else:
         st.write("波乱度を計算するための十分なレースデータがありません。")
 
-# --- tab4: 父馬 --- (省略せず記載)
 with tab4:
     st.subheader("父馬別：単勝回収率上位10名")
     s4_all = calc_stats(df, '父馬名')
