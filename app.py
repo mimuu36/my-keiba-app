@@ -31,20 +31,18 @@ if not check_password():
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 DB_FILE = 'keiba_data.db'
 
-# 【超重要】キャッシュを使わず、毎回正確に列名を取得する
 def get_real_columns():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.execute("SELECT * FROM race_results LIMIT 1")
     cols = [description[0] for description in cursor.description]
     conn.close()
-    
-    # 「日」が含まれる列、「月」が含まれる列、「時」が含まれる列を自動判定
-    d_col = next((c for c in cols if "日" in c or "date" in c.lower()), cols[0])
-    m_col = next((c for c in cols if "月" in c or "month" in c.lower()), None)
-    t_col = next((c for c in cols if "時" in c or "time" in c.lower()), None)
-    return d_col, m_col, t_col
+    d_col = next((c for c in cols if "日" in c or "date" in c.lower()), "日付")
+    m_col = next((c for c in cols if "月" in c or "month" in c.lower()), "月")
+    t_col = next((c for c in cols if "時" in c or "time" in c.lower()), "時間")
+    c_col = next((c for c in cols if "条件" in c or "クラス" in c or "class" in c.lower()), "条件")
+    return d_col, m_col, t_col, c_col
 
-d_col, m_col, t_col = get_real_columns()
+d_col, m_col, t_col, c_col = get_real_columns()
 
 # --- 👈 左側：サイドバー ---
 st.sidebar.title("🎮 操作パネル")
@@ -66,18 +64,30 @@ else:
     start_year = current_year - years_back
     filter_query = f"AND {d_col} >= '{start_year}-01-01' AND {m_col} IN ({m_dict[season]})"
 
-# 2. レース条件
+# 2. レース条件 (クラス指定を追加！)
 st.sidebar.header("2. レース条件")
 baba = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 2400], index=2)
 
+# クラス（条件）の絞り込み
+race_class = st.sidebar.selectbox("レースクラス", ["全クラス", "新馬・未勝利", "1勝クラス", "2勝・3勝クラス", "オープン・重賞"])
+class_sql = ""
+if race_class == "新馬・未勝利":
+    class_sql = f"AND ({c_col} LIKE '%新馬%' OR {c_col} LIKE '%未勝利%')"
+elif race_class == "1勝クラス":
+    class_sql = f"AND {c_col} LIKE '%1勝%'"
+elif race_class == "2勝・3勝クラス":
+    class_sql = f"AND ({c_col} LIKE '%2勝%' OR {c_col} LIKE '%3勝%')"
+elif race_class == "オープン・重賞":
+    class_sql = f"AND ({c_col} LIKE '%オープン%' OR {c_col} LIKE '%G1%' OR {c_col} LIKE '%G2%' OR {c_col} LIKE '%G3%' OR {c_col} LIKE '%L%')"
+
+# 時間帯
 time_zone = st.sidebar.selectbox("時間帯", ["全時間帯", "午前 (1R-6R付近)", "午後 (7R-12R付近)"])
 time_sql = ""
-if t_col:
-    if time_zone == "午前 (1R-6R付近)":
-        time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) < 13)"
-    elif time_zone == "午後 (7R-12R付近)":
-        time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) >= 13)"
+if time_zone == "午前 (1R-6R付近)":
+    time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) < 13)"
+elif time_zone == "午後 (7R-12R付近)":
+    time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) >= 13)"
 
 if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
@@ -87,15 +97,14 @@ st.sidebar.header("3. 気になる馬情報")
 st.sidebar.header("4. 期待値シミュレーター")
 
 # --- データ読み込み ---
-def load_filtered_data(baba_val, dist_val, extra_sql, t_sql):
+def load_filtered_data(baba_val, dist_val, extra_sql, t_sql, c_sql):
     conn = sqlite3.connect(DB_FILE)
-    query = f"SELECT * FROM race_results WHERE 場所='東京' AND 馬場 LIKE '{baba_val}%' AND 距離={dist_val} {extra_sql} {t_sql}"
+    query = f"SELECT * FROM race_results WHERE 場所='東京' AND 馬場 LIKE '{baba_val}%' AND 距離={dist_val} {extra_sql} {t_sql} {c_sql}"
     try:
         df = pd.read_sql(query, conn)
         return df
     except Exception as e:
-        # 万が一エラーが出た場合、その時のSQLと本当のカラム名を画面に出す（デバッグ用）
-        st.error(f"SQL実行失敗。DBのカラム名: {get_real_columns()}")
+        st.error(f"SQLエラーが発生しました。")
         st.code(query)
         return pd.DataFrame()
     finally:
@@ -106,7 +115,7 @@ if "mode" not in st.session_state:
     st.info("👈 左側のボタンを押すと、分析結果が表示されます。")
     st.stop()
 
-df = load_filtered_data(baba, dist, filter_query, time_sql)
+df = load_filtered_data(baba, dist, filter_query, time_sql, class_sql)
 
 if not df.empty:
     st.success(f"✅ {len(df)}件のデータを抽出しました")
