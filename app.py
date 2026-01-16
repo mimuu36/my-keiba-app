@@ -115,25 +115,38 @@ st.title(f"🚀 分析結果（{len(df)}件）")
 
 tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
+# グラフ内に数値を表示する補助関数
+def add_labels(ax, suffix="%"):
+    for p in ax.patches:
+        height = p.get_height()
+        if height > 0:
+            ax.annotate(f'{height:.1f}{suffix}', 
+                        (p.get_x() + p.get_width() / 2., height / 2), 
+                        ha = 'center', va = 'center', 
+                        xytext = (0, 0), 
+                        textcoords = 'offset points',
+                        color='white', fontweight='bold', fontsize=10)
+
 with tab1:
     st.subheader("馬番別：単勝回収率")
     s1 = calc_stats(df, '馬番')
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='馬番', y='単勝回収率', data=s1, ax=ax, palette="RdYlGn")
     ax.axhline(100, color='black', linestyle='--')
+    ax.set_ylabel("単勝回収率 (%)")
+    add_labels(ax)
     st.pyplot(fig)
-    st.dataframe(s1.sort_values('単勝回収率', ascending=False))
 
 with tab2:
     st.subheader("騎手別：勝率上位10名")
     s2 = calc_stats(df, '騎手')
-    # 出走回数5回以上の騎手に限定（データの信頼性のため）
     s2 = s2[s2['出走回数'] >= 5].sort_values('勝率', ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'])
+    ax.set_ylabel("勝率 (%)")
+    add_labels(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
-    st.dataframe(s2)
 
 with tab3:
     st.subheader("人気別：複勝率（1番人気〜10番人気）")
@@ -141,17 +154,18 @@ with tab3:
     s3 = s3[s3['人気'] <= 10].sort_values('人気')
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r")
+    ax.set_ylabel("複勝率 (%)")
+    add_labels(ax)
     st.pyplot(fig)
-    st.dataframe(s3)
 
 with tab4:
     st.subheader("父馬別：単勝回収率上位10名")
     s4 = calc_stats(df, '父馬名')
-    # 出走回数3回以上の父馬に限定
     s4 = s4[s4['出走回数'] >= 3].sort_values('単勝回収率', ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'])
     ax.axhline(100, color='red', linestyle='--')
+    ax.set_ylabel("単勝回収率 (%)")
+    add_labels(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
-    st.dataframe(s4)
