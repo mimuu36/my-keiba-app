@@ -29,24 +29,22 @@ if not check_password():
 
 # --- 🐎 アプリ設定 ---
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
-
 DB_FILE = 'keiba_data.db'
 
-# 最初に一度だけ列名を確定させる
-@st.cache_resource
-def get_db_schema():
+# 【超重要】キャッシュを使わず、毎回正確に列名を取得する
+def get_real_columns():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.execute("SELECT * FROM race_results LIMIT 1")
     cols = [description[0] for description in cursor.description]
     conn.close()
     
-    # 日付、月、時間の列を特定
-    d_col = next((c for c in cols if c in ['日付', '年月日', 'date', 'Date']), "日付")
-    m_col = next((c for c in cols if c in ['月', 'month', 'Month']), "月")
-    t_col = next((c for c in cols if c in ['時間', '時刻', 'time', 'Time']), "時間")
+    # 「日」が含まれる列、「月」が含まれる列、「時」が含まれる列を自動判定
+    d_col = next((c for c in cols if "日" in c or "date" in c.lower()), cols[0])
+    m_col = next((c for c in cols if "月" in c or "month" in c.lower()), None)
+    t_col = next((c for c in cols if "時" in c or "time" in c.lower()), None)
     return d_col, m_col, t_col
 
-d_col, m_col, t_col = get_db_schema()
+d_col, m_col, t_col = get_real_columns()
 
 # --- 👈 左側：サイドバー ---
 st.sidebar.title("🎮 操作パネル")
@@ -75,10 +73,11 @@ dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 24
 
 time_zone = st.sidebar.selectbox("時間帯", ["全時間帯", "午前 (1R-6R付近)", "午後 (7R-12R付近)"])
 time_sql = ""
-if time_zone == "午前 (1R-6R付近)":
-    time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) < 13)"
-elif time_zone == "午後 (7R-12R付近)":
-    time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) >= 13)"
+if t_col:
+    if time_zone == "午前 (1R-6R付近)":
+        time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) < 13)"
+    elif time_zone == "午後 (7R-12R付近)":
+        time_sql = f"AND (CAST(SUBSTR({t_col}, 1, 2) AS INTEGER) >= 13)"
 
 if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
@@ -95,7 +94,9 @@ def load_filtered_data(baba_val, dist_val, extra_sql, t_sql):
         df = pd.read_sql(query, conn)
         return df
     except Exception as e:
-        st.error(f"SQLエラー詳細: {e}") # ここで本当のSQL文を表示
+        # 万が一エラーが出た場合、その時のSQLと本当のカラム名を画面に出す（デバッグ用）
+        st.error(f"SQL実行失敗。DBのカラム名: {get_real_columns()}")
+        st.code(query)
         return pd.DataFrame()
     finally:
         conn.close()
