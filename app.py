@@ -32,7 +32,7 @@ if not check_password():
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 DB_FILE = 'keiba_data.db'
 
-# --- 👈 左側：操作パネル (維持) ---
+# --- 👈 左側：操作パネル ---
 st.sidebar.title("🎮 操作パネル")
 st.sidebar.header("1. 過去データの参照範囲")
 range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節で指定"])
@@ -101,22 +101,17 @@ def calc_stats(df, group_col):
     res['単勝回収率'] = (res['単勝回収計'] / (res['出走回数'] * 100)).round(1)
     return res
 
-# 🛠️ 改良版：ラベル表示関数（棒の先端内側・白縁取り黒文字）
+# 🛠️ ラベル表示関数（袋文字）
 def add_smart_labels(ax, suffix="%"):
     for p in ax.patches:
         height = p.get_height()
         if height > 0:
-            # 棒が短すぎる場合は上に、十分な長さなら内側に配置
             va = 'bottom' if height < 5 else 'top'
-            y_pos = height + 0.5 if height < 5 else height - 0.5
-            color = '#000000' # 黒文字
-            
+            y_pos = height + 0.3 if height < 5 else height - 0.3
             txt = ax.annotate(f'{height:.1f}{suffix}', 
                         (p.get_x() + p.get_width() / 2., y_pos), 
                         ha='center', va=va, 
-                        color=color, fontweight='bold', fontsize=10)
-            
-            # 白い縁取り（パスエフェクト）を追加して視認性を確保
+                        color='black', fontweight='bold', fontsize=10)
             txt.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
 
 # --- 👉 右側：メイン表示エリア ---
@@ -140,28 +135,33 @@ with tab1:
     st.subheader("馬番期待値")
     s1 = calc_stats(df, '馬番')
     avg_f = (df['確定着順'] <= 3).mean() * 100
-    v_max = s1['複勝率'].max()
+    
+    # --- 🏆 上位5件のグラデーションロジック ---
+    s1_sorted = s1.sort_values('複勝率', ascending=False)
+    top_5_gate = s1_sorted.head(5)['馬番'].tolist()
     
     colors = []
-    if highlight_on:
-        colors = ['#E74C3C' if x == target_horse_num else '#E5E7E9' for x in s1['馬番']]
-    else:
-        for val in s1['複勝率']:
-            if val > avg_f:
-                diff = (val - avg_f) / (v_max - avg_f) if v_max != avg_f else 1.0
-                if diff > 0.6: colors.append("#E74C3C") 
-                elif diff > 0.3: colors.append("#E67E22")
-                else: colors.append("#F1C40F") 
-            else: colors.append("#3498DB")
+    for gate in s1['馬番']:
+        if highlight_on:
+            colors.append('#E74C3C' if gate == target_horse_num else '#E5E7E9')
+        else:
+            if gate in top_5_gate:
+                rank = top_5_gate.index(gate) + 1
+                if rank == 1: colors.append("#E74C3C") # 1位: 赤
+                elif rank <= 3: colors.append("#E67E22") # 2-3位: オレンジ
+                else: colors.append("#F1C40F") # 4-5位: 黄色
+            else:
+                colors.append("#87CEEB") # 6位以下: 水色
 
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors, edgecolor='white', linewidth=0.5)
     ax.axhline(avg_f, color='blue', linestyle='--', alpha=0.6, linewidth=1.5)
     ax.set_ylabel("複勝率 (%)")
-    ax.set_ylim(0, v_max * 1.1)
+    ax.set_ylim(0, s1['複勝率'].max() * 1.15)
     add_smart_labels(ax)
     st.pyplot(fig)
-    best_row = s1.sort_values('複勝率', ascending=False).iloc[0]
+    
+    best_row = s1_sorted.iloc[0]
     st.markdown(f"💡 **この条件だと {int(best_row['馬番'])}番（{best_row['複勝率']}%）が狙い！** (平均: {avg_f:.1f}%)")
 
 with tab2:
