@@ -108,17 +108,21 @@ def calc_stats(df, group_col):
     res['単勝回収率'] = (res['単勝回収計'] / (res['出走回数'] * 100)).round(1)
     return res
 
-# 🛠️ ラベル表示関数（袋文字）
-def add_smart_labels(ax, suffix="%"):
-    for p in ax.patches:
+# 🛠️ ラベル表示関数（分母も表示する実戦仕様）
+def add_smart_labels(ax, df_stats, col_name, val_name, suffix="%"):
+    for i, p in enumerate(ax.patches):
         height = p.get_height()
-        if height > 0 and not pd.isna(height):
+        if height >= 0 and not pd.isna(height):
+            # df_statsから該当する出走回数を取得
+            count = df_stats.iloc[i]['出走回数']
             va = 'bottom' if height < 5 else 'top'
             y_pos = height + 0.3 if height < 5 else height - 0.3
-            txt = ax.annotate(f'{height:.1f}{suffix}', 
+            # 「100.0% (1)」のような形式にする
+            label_text = f'{height:.1f}{suffix}\n({int(count)})'
+            txt = ax.annotate(label_text, 
                         (p.get_x() + p.get_width() / 2., y_pos), 
                         ha='center', va=va, 
-                        color='black', fontweight='bold', fontsize=10)
+                        color='black', fontweight='bold', fontsize=8) # 文字サイズを微調整
             txt.set_path_effects([path_effects.withStroke(linewidth=3, foreground='white')])
 
 # --- 👉 右側：メイン表示エリア ---
@@ -135,7 +139,7 @@ if df.empty:
     st.warning("⚠️ 条件に合うデータが0件です。条件を緩めてください。")
     st.stop()
 
-st.title(f"🚀 期待値分析（{len(df)}件）")
+st.title(f"🚀 期待値分析（{len(df)}件 / {len(df.groupby(['年','月','日','レース番号']))}レース）")
 tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
 with tab1:
@@ -164,25 +168,24 @@ with tab1:
         sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors, edgecolor='white', linewidth=0.5)
         ax.axhline(avg_f, color='blue', linestyle='--', alpha=0.6, linewidth=1.5)
         ax.set_ylabel("複勝率 (%)")
-        if v_max > 0: ax.set_ylim(0, v_max * 1.25)
-        add_smart_labels(ax)
+        if v_max > 0: ax.set_ylim(0, v_max * 1.35) # ラベル用に少し高さを確保
+        add_smart_labels(ax, s1, '馬番', '複勝率')
         st.pyplot(fig)
-        best_row = s1_sorted.iloc[0]
-        st.markdown(f"💡 **この条件だと {int(best_row['馬番'])}番（{best_row['複勝率']}%）が狙い！** (平均: {avg_f:.1f}%)")
+        st.markdown(f"💡 **全体平均複勝率: {avg_f:.1f}%**")
     else:
         st.write("データがありません。")
 
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
-    s2 = calc_stats(df, '騎手')
-    s2 = s2[s2['出走回数'] >= 5].sort_values('勝率', ascending=False).head(10)
+    s2_all = calc_stats(df, '騎手')
+    s2 = s2_all[s2_all['出走回数'] >= 5].sort_values('勝率', ascending=False).head(10)
     if not s2.empty:
         fig, ax = plt.subplots(figsize=(10, 4))
         sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'], edgecolor='white')
         ax.set_ylabel("勝率 (%)")
         v_max_s2 = s2['勝率'].max()
-        if not pd.isna(v_max_s2) and v_max_s2 > 0: ax.set_ylim(0, v_max_s2 * 1.25)
-        add_smart_labels(ax)
+        if v_max_s2 > 0: ax.set_ylim(0, v_max_s2 * 1.35)
+        add_smart_labels(ax, s2, '騎手', '勝率')
         plt.xticks(rotation=45)
         st.pyplot(fig)
     else:
@@ -197,24 +200,24 @@ with tab3:
         sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r", edgecolor='white')
         ax.set_ylabel("複勝率 (%)")
         v_max_s3 = s3['複勝率'].max()
-        if not pd.isna(v_max_s3) and v_max_s3 > 0: ax.set_ylim(0, v_max_s3 * 1.25)
-        add_smart_labels(ax)
+        if v_max_s3 > 0: ax.set_ylim(0, v_max_s3 * 1.35)
+        add_smart_labels(ax, s3, '人気', '複勝率')
         st.pyplot(fig)
     else:
         st.write("データがありません。")
 
 with tab4:
     st.subheader("父馬別：単勝回収率上位10名")
-    s4 = calc_stats(df, '父馬名')
-    s4 = s4[s4['出走回数'] >= 3].sort_values('単勝回収率', ascending=False).head(10)
+    s4_all = calc_stats(df, '父馬名')
+    s4 = s4_all[s4_all['出走回数'] >= 3].sort_values('単勝回収率', ascending=False).head(10)
     if not s4.empty:
         fig, ax = plt.subplots(figsize=(10, 4))
         sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'], edgecolor='white')
         ax.axhline(100, color='red', linestyle='--', alpha=0.5)
         ax.set_ylabel("単勝回収率 (%)")
         v_max_s4 = s4['単勝回収率'].max()
-        if not pd.isna(v_max_s4) and v_max_s4 > 0: ax.set_ylim(0, v_max_s4 * 1.25)
-        add_smart_labels(ax)
+        if v_max_s4 > 0: ax.set_ylim(0, v_max_s4 * 1.35)
+        add_smart_labels(ax, s4, '父馬名', '単勝回収率')
         plt.xticks(rotation=45)
         st.pyplot(fig)
     else:
