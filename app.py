@@ -33,7 +33,6 @@ DB_FILE = 'keiba_data.db'
 
 # --- 👈 左側：操作パネル (完全固定) ---
 st.sidebar.title("🎮 操作パネル")
-
 st.sidebar.header("1. 過去データの参照範囲")
 range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節で指定"])
 
@@ -105,7 +104,6 @@ def add_labels_inside(ax, suffix="%"):
     for p in ax.patches:
         height = p.get_height()
         if height > 0:
-            # 棒の高さの半分（中心）に配置
             ax.annotate(f'{height:.1f}{suffix}', 
                         (p.get_x() + p.get_width() / 2., height / 2), 
                         ha='center', va='center', 
@@ -134,16 +132,26 @@ with tab1:
     s1 = calc_stats(df, '馬番')
     avg_fukusho = (df['確定着順'] <= 3).mean() * 100
     
-    # --- 🎨 期待値に応じた色分けロジック ---
-    # 赤(高) -> オレンジ -> 黄 -> 緑 -> 青 -> 灰(低) のグラデーション
-    cmap = mcolors.LinearSegmentedColormap.from_list("race", ["#808080", "#3498DB", "#2ECC71", "#F1C40F", "#E67E22", "#E74C3C"])
-    norm = mcolors.Normalize(vmin=s1['複勝率'].min(), vmax=s1['複勝率'].max())
+    # --- 🎨 期待値条件による色分け ---
+    high_cmap = mcolors.LinearSegmentedColormap.from_list("high", ["#F1C40F", "#E67E22", "#E74C3C"]) # 黄 -> 橙 -> 赤
     
-    # 強調表示がONの場合は指定馬以外をグレーアウト、OFFなら期待値カラー
+    colors = []
     if highlight_on:
         colors = ['#E74C3C' if x == target_horse_num else '#DCDCDC' for x in s1['馬番']]
     else:
-        colors = [cmap(norm(val)) for val in s1['複勝率']]
+        # 平均以上のデータの中での正規化用
+        high_vals = s1[s1['複勝率'] >= avg_fukusho]['複勝率']
+        v_min = high_vals.min() if not high_vals.empty else avg_fukusho
+        v_max = high_vals.max() if not high_vals.empty else avg_fukusho + 1
+
+        for val in s1['複勝率']:
+            if val >= avg_fukusho:
+                # 平均以上のものはグラデーション
+                ratio = (val - v_min) / (v_max - v_min) if v_max != v_min else 1.0
+                colors.append(high_cmap(ratio))
+            else:
+                # 平均以下のものは一律で青
+                colors.append("#3498DB")
 
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors)
@@ -152,19 +160,8 @@ with tab1:
     add_labels_inside(ax)
     st.pyplot(fig)
     
-    # --- 補足説明ロジック ---
     target_row = s1.sort_values('複勝率', ascending=False).iloc[0]
-    best_gate = int(target_row['馬番'])
-    best_rate = target_row['複勝率']
-    
-    st.markdown(f"💡 **この条件だと {best_gate}番（{best_rate}%）が狙い！** (全体平均: {avg_fukusho:.1f}%)")
-    
-    if highlight_on:
-        user_horse = s1[s1['馬番'] == target_horse_num]
-        if not user_horse.empty:
-            diff = user_horse['複勝率'].values[0] - avg_fukusho
-            mark = "🟢 有利" if diff > 0 else "△ 慎重に"
-            st.info(f"🐎 気になる馬({target_horse_num}番)の期待値: {user_horse['複勝率'].values[0]}% [{mark}]")
+    st.markdown(f"💡 **この条件だと {int(target_row['馬番'])}番（{target_row['複勝率']}%）が狙い！** (全体平均: {avg_fukusho:.1f}%)")
 
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
@@ -198,3 +195,4 @@ with tab4:
     add_labels_inside(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
+    
