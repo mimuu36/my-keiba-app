@@ -97,17 +97,19 @@ def calc_stats(df, group_col):
     ).reset_index()
     res['勝率'] = (res['勝数'] / res['出走回数'] * 100).round(1)
     res['複勝率'] = (res['複勝数'] / res['出走回数'] * 100).round(1)
-    res['単勝回収率'] = (res['単勝回収計'] / (res['出走回数'] * 100)).round(1)
+    res['単勝回収率'] = (res['単勝回収計'] / (res['出走回_数'] * 100)).round(1)
     return res
 
-def add_labels_inside(ax, suffix="%"):
+# 🛠️ 改良版：ラベル表示関数（先端の上に黒太文字）
+def add_labels_top(ax, suffix="%"):
     for p in ax.patches:
         height = p.get_height()
         if height > 0:
             ax.annotate(f'{height:.1f}{suffix}', 
-                        (p.get_x() + p.get_width() / 2., height / 2), 
-                        ha='center', va='center', 
-                        color='white', fontweight='bold', fontsize=9)
+                        (p.get_x() + p.get_width() / 2., height), 
+                        ha='center', va='bottom', 
+                        color='#333333', fontweight='bold', fontsize=10,
+                        xytext=(0, 3), textcoords='offset points')
 
 # --- 👉 右側：メイン表示エリア ---
 if "mode" not in st.session_state:
@@ -132,8 +134,6 @@ with tab1:
     s1 = calc_stats(df, '馬番')
     avg_fukusho = (df['確定着順'] <= 3).mean() * 100
     
-    # --- 🎨 厳選グラデーションロジック ---
-    # 平均+5%以上なら赤系へ、平均に近いなら黄色、平均以下は青
     colors = []
     if highlight_on:
         colors = ['#FF4B4B' if x == target_horse_num else '#E5E7E9' for x in s1['馬番']]
@@ -141,33 +141,35 @@ with tab1:
         v_max = s1['複勝率'].max()
         for val in s1['複勝率']:
             if val > avg_fukusho:
-                # 平均を超えている場合、その「超え具合」で色を変える
                 diff_ratio = (val - avg_fukusho) / (v_max - avg_fukusho) if v_max != avg_fukusho else 1.0
-                if diff_ratio > 0.6: colors.append("#E74C3C") # 濃い赤（特注）
-                elif diff_ratio > 0.3: colors.append("#E67E22") # オレンジ（狙い）
-                else: colors.append("#F1C40F") # 黄色（検討）
+                if diff_ratio > 0.6: colors.append("#E74C3C") 
+                elif diff_ratio > 0.3: colors.append("#E67E22")
+                else: colors.append("#F1C40F") 
             else:
-                colors.append("#3498DB") # 平均以下は一律青
+                colors.append("#3498DB")
 
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors)
-    ax.axhline(avg_fukusho, color='blue', linestyle='--', label='全体平均', alpha=0.7)
+    # 棒に白いエッジを入れてメリハリを出す
+    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors, edgecolor='white', linewidth=0.5)
+    ax.axhline(avg_fukusho, color='blue', linestyle='--', label='全体平均', alpha=0.5)
     ax.set_ylabel("複勝率 (%)")
-    add_labels_inside(ax)
+    # Y軸の範囲を少し広げてラベルが切れないようにする
+    ax.set_ylim(0, s1['複勝率'].max() * 1.15)
+    add_labels_top(ax)
     st.pyplot(fig)
     
     target_row = s1.sort_values('複勝率', ascending=False).iloc[0]
     st.markdown(f"💡 **この条件だと {int(target_row['馬番'])}番（{target_row['複勝率']}%）が狙い！** (全体平均: {avg_fukusho:.1f}%)")
 
-# (他タブの騎手・人気・父馬は前回の「見た目変えない」ルールを維持して継続)
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
     s2 = calc_stats(df, '騎手')
     s2 = s2[s2['出走回数'] >= 5].sort_values('勝率', ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'])
+    sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'], edgecolor='white')
     ax.set_ylabel("勝率 (%)")
-    add_labels_inside(ax)
+    ax.set_ylim(0, s2['勝率'].max() * 1.15)
+    add_labels_top(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
@@ -176,19 +178,4 @@ with tab3:
     s3 = calc_stats(df, '人気')
     s3 = s3[s3['人気'] <= 10].sort_values('人気')
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r")
-    ax.set_ylabel("複勝率 (%)")
-    add_labels_inside(ax)
-    st.pyplot(fig)
-
-with tab4:
-    st.subheader("父馬別：単勝回収率（上位10名）")
-    s4 = calc_stats(df, '父馬名')
-    s4 = s4[s4['出走回数'] >= 3].sort_values('単勝回収率', ascending=False).head(10)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'])
-    ax.axhline(100, color='red', linestyle='--')
-    ax.set_ylabel("単勝回収率 (%)")
-    add_labels_inside(ax)
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
+    sns.barplot(x='人気', y='
