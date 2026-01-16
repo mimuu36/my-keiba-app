@@ -30,44 +30,35 @@ if not check_password():
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 DB_FILE = 'keiba_data.db'
 
-def get_real_columns():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.execute("SELECT * FROM race_results LIMIT 1")
-    cols = [description[0] for description in cursor.description]
-    conn.close()
-    d_col = next((c for c in cols if "日" in c or "date" in c.lower()), "日付")
-    m_col = next((c for c in cols if "月" in c or "month" in c.lower()), "月")
-    r_col = next((c for c in cols if "R" in c or "レース" in c or "Race" in c), "R")
-    c_col = next((c for c in cols if "条件" in c or "クラス" in c or "class" in c.lower()), "条件")
-    b_col = next((c for c in cols if "馬場" in c or "surface" in c.lower()), "馬場")
-    p_col = next((c for c in cols if "場所" in c or "site" in c.lower()), "場所")
-    dist_col = next((c for c in cols if "距離" in c or "dist" in c.lower()), "距離")
-    return d_col, m_col, r_col, c_col, b_col, p_col, dist_col
-
-d_col, m_col, r_col, c_col, b_col, p_col, dist_col = get_real_columns()
-
-# --- 👈 左側：サイドバー（見た目維持） ---
+# --- 👈 左側：サイドバー（見た目固定） ---
 st.sidebar.title("🎮 操作パネル")
 
 # 1. 過去データの参照範囲
 st.sidebar.header("1. 過去データの参照範囲")
 range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節で指定"])
 
+# DBの「年」が「20」等の2桁なので、それに合わせるための処理
 filter_query = ""
 if range_type == "日付範囲で指定":
     start_date = st.sidebar.date_input("開始日", date(2020, 1, 1))
     end_date = st.sidebar.date_input("終了日", date(2025, 12, 31))
-    filter_query = f"AND {d_col} BETWEEN '{start_date}' AND '{end_date}'"
+    # 年を2桁に変換して検索
+    s_yr, e_yr = str(start_date.year)[2:], str(end_date.year)[2:]
+    filter_query = f"AND 年 BETWEEN {s_yr} AND {e_yr}"
 else:
     season = st.sidebar.selectbox("対象シーズン", ["春 (4-6月)", "秋 (10-11月)", "冬 (1-2月)"])
     years_back = st.sidebar.slider("過去何年分を対象にするか", 1, 6, 3)
     m_dict = {"冬 (1-2月)": "1,2", "春 (4-6月)": "4,5,6", "秋 (10-11月)": "10,11"}
-    start_year = 2026 - years_back
-    filter_query = f"AND {d_col} >= '{start_year}-01-01' AND {m_col} IN ({m_dict[season]})"
+    # 26年(2026)から遡る
+    start_year_2digit = 26 - years_back
+    filter_query = f"AND 年 >= {start_year_2digit} AND 月 IN ({m_dict[season]})"
 
 # 2. レース条件
 st.sidebar.header("2. レース条件")
-baba = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
+baba_input = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
+# DB表記に変換 (ダート -> ダ)
+baba_val = "ダ" if baba_input == "ダート" else "芝"
+
 dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 2400], index=2)
 race_class = st.sidebar.selectbox("レースクラス", ["全クラス", "新馬・未勝利", "1勝クラス", "2勝・3勝クラス", "オープン・重賞"])
 
@@ -77,22 +68,22 @@ time_sql = ""
 if time_mode == "時間帯で選ぶ":
     tz = st.sidebar.selectbox("時間帯区分", ["全レース", "午前 (1R～4R)", "午後 (5R～12R)"])
     if tz == "午前 (1R～4R)":
-        time_sql = f"AND CAST({r_col} AS INTEGER) <= 4"
+        time_sql = "AND CAST(レース番号 AS INTEGER) <= 4"
     elif tz == "午後 (5R～12R)":
-        time_sql = f"AND CAST({r_col} AS INTEGER) >= 5"
+        time_sql = "AND CAST(レース番号 AS INTEGER) >= 5"
 else:
     target_r = st.sidebar.number_input("レース番号(R)", 1, 12, 11)
-    time_sql = f"AND CAST({r_col} AS INTEGER) = {target_r}"
+    time_sql = f"AND CAST(レース番号 AS INTEGER) = {target_r}"
 
 class_sql = ""
 if race_class == "新馬・未勝利":
-    class_sql = f"AND ({c_col} LIKE '%新馬%' OR {c_col} LIKE '%未勝利%')"
+    class_sql = "AND (略レース名 LIKE '%新馬%' OR 略レース名 LIKE '%未勝利%')"
 elif race_class == "1勝クラス":
-    class_sql = f"AND ({c_col} LIKE '%1勝%' OR {c_col} LIKE '%500万%')"
+    class_sql = "AND (略レース名 LIKE '%1勝%' OR 略レース名 LIKE '%500万%')"
 elif race_class == "2勝・3勝クラス":
-    class_sql = f"AND ({c_col} LIKE '%2勝%' OR {c_col} LIKE '%3勝%' OR {c_col} LIKE '%1000万%' OR {c_col} LIKE '%1600万%')"
+    class_sql = "AND (略レース名 LIKE '%2勝%' OR 略レース名 LIKE '%3勝%' OR 略レース名 LIKE '%1000万%' OR 略レース名 LIKE '%1600万%')"
 elif race_class == "オープン・重賞":
-    class_sql = f"AND ({c_col} LIKE '%オープン%' OR {c_col} LIKE '%OP%' OR {c_col} LIKE '%重賞%')"
+    class_sql = "AND (略レース名 LIKE '%オープン%' OR 略レース名 LIKE '%OP%' OR 略レース名 LIKE '%重賞%' OR 略レース名 LIKE '%G%')"
 
 if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
@@ -101,15 +92,14 @@ st.sidebar.markdown("---")
 st.sidebar.header("3. 気になる馬情報")
 st.sidebar.header("4. 期待値シミュレーター")
 
-# --- 🔍 データ取得ロジック（柔軟性MAX） ---
-def load_filtered_data(baba_val, dist_val, extra_sql, t_sql, c_sql):
+# --- 🔍 データ取得 ---
+def load_filtered_data(b_val, d_val, extra_sql, t_sql, c_sql):
     conn = sqlite3.connect(DB_FILE)
-    # 距離と馬場をLIKE検索（部分一致）にして、より広く拾えるように修正
     query = f"""
     SELECT * FROM race_results 
-    WHERE {p_col} LIKE '%東京%' 
-    AND {b_col} LIKE '%{baba_val}%' 
-    AND {dist_col} LIKE '%{dist_val}%' 
+    WHERE 場所 LIKE '%東京%' 
+    AND 馬場 = '{b_val}' 
+    AND 距離 = {d_val} 
     {extra_sql} {t_sql} {c_sql}
     """
     try:
@@ -124,15 +114,12 @@ if "mode" not in st.session_state:
     st.info("👈 左側のボタンを押すと、分析結果が表示されます。")
     st.stop()
 
-df, sql_debug = load_filtered_data(baba, dist, filter_query, time_sql, class_sql)
+df, sql_debug = load_filtered_data(baba_val, dist, filter_query, time_sql, class_sql)
 
 if not df.empty:
     st.success(f"✅ {len(df)}件のデータを抽出しました")
-    st.dataframe(df.head(50))
+    st.dataframe(df)
 else:
-    st.warning("⚠️ ヒットしません。以下が現在のDBの生データ（最初の5件）です。列名と内容を確認してください。")
-    conn = sqlite3.connect(DB_FILE)
-    raw_df = pd.read_sql(f"SELECT * FROM race_results LIMIT 5", conn)
-    conn.close()
-    st.table(raw_df)
-    st.write("実行されたSQL:", sql_debug)
+    st.warning("⚠️ 条件に合うデータが0件です。")
+    # デバッグ用にSQLを表示（不要なら後で消せます）
+    st.code(sql_debug)
