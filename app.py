@@ -51,8 +51,17 @@ else:
     filter_query = f"AND 年 >= {start_year_2digit} AND 月 IN ({m_dict[season]})"
 
 st.sidebar.header("2. レース条件")
+# 馬場種別（芝 or ダート）
 baba_input = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 baba_val = "ダ" if baba_input == "ダート" else "芝"
+
+# 【復旧】馬場状態（良、稍重、重、不良）
+baba_condition = st.sidebar.multiselect("馬場状態", ["良", "稍重", "重", "不良"], default=["良", "稍重", "重", "不良"])
+cond_sql = ""
+if baba_condition:
+    cond_str = "','".join(baba_condition)
+    cond_sql = f"AND 馬場状態 IN ('{cond_str}')"
+
 dist = st.sidebar.selectbox("距離(m)", [1300, 1400, 1600, 1800, 2000, 2100, 2400], index=2)
 race_class = st.sidebar.selectbox("レースクラス", ["全クラス", "新馬・未勝利", "1勝クラス", "2勝・3勝クラス", "オープン・重賞"])
 
@@ -120,12 +129,13 @@ if "mode" not in st.session_state:
     st.stop()
 
 conn = sqlite3.connect(DB_FILE)
-query = f"SELECT * FROM race_results WHERE 場所 LIKE '%東京%' AND 馬場 = '{baba_val}' AND 距離 = {dist} {filter_query} {time_sql} {class_sql}"
+# 【修正】SQLに cond_sql (馬場状態) を追加
+query = f"SELECT * FROM race_results WHERE 場所 LIKE '%東京%' AND 馬場 = '{baba_val}' {cond_sql} AND 距離 = {dist} {filter_query} {time_sql} {class_sql}"
 df = pd.read_sql(query, conn)
 conn.close()
 
 if df.empty:
-    st.warning("⚠️ 条件に合うデータが0件です。")
+    st.warning("⚠️ 条件に合うデータが0件です。条件を緩めてください。")
     st.stop()
 
 st.title(f"🚀 期待値分析（{len(df)}件）")
@@ -135,8 +145,6 @@ with tab1:
     st.subheader("馬番期待値")
     s1 = calc_stats(df, '馬番')
     avg_f = (df['確定着順'] <= 3).mean() * 100
-    
-    # --- 🏆 上位5件のグラデーションロジック ---
     s1_sorted = s1.sort_values('複勝率', ascending=False)
     top_5_gate = s1_sorted.head(5)['馬番'].tolist()
     
@@ -147,11 +155,11 @@ with tab1:
         else:
             if gate in top_5_gate:
                 rank = top_5_gate.index(gate) + 1
-                if rank == 1: colors.append("#E74C3C") # 1位: 赤
-                elif rank <= 3: colors.append("#E67E22") # 2-3位: オレンジ
-                else: colors.append("#F1C40F") # 4-5位: 黄色
+                if rank == 1: colors.append("#E74C3C") 
+                elif rank <= 3: colors.append("#E67E22")
+                else: colors.append("#F1C40F") 
             else:
-                colors.append("#87CEEB") # 6位以下: 水色
+                colors.append("#87CEEB")
 
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors, edgecolor='white', linewidth=0.5)
@@ -160,7 +168,6 @@ with tab1:
     ax.set_ylim(0, s1['複勝率'].max() * 1.15)
     add_smart_labels(ax)
     st.pyplot(fig)
-    
     best_row = s1_sorted.iloc[0]
     st.markdown(f"💡 **この条件だと {int(best_row['馬番'])}番（{best_row['複勝率']}%）が狙い！** (平均: {avg_f:.1f}%)")
 
