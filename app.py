@@ -7,7 +7,7 @@ import japanize_matplotlib
 from datetime import date
 import os
 
-# --- 🔒 認証機能 ---
+# --- 🔒 認証機能 (維持) ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["MY_PASSWORD"]:
@@ -30,7 +30,7 @@ if not check_password():
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 DB_FILE = 'keiba_data.db'
 
-# --- 👈 左側：操作パネル (見た目・構成は完全固定) ---
+# --- 👈 左側：操作パネル (完全固定) ---
 st.sidebar.title("🎮 操作パネル")
 
 st.sidebar.header("1. 過去データの参照範囲")
@@ -84,7 +84,7 @@ st.sidebar.markdown("---")
 st.sidebar.header("3. 気になる馬情報")
 st.sidebar.header("4. 期待値シミュレーター")
 
-# --- 🔍 統計計算用関数 ---
+# --- 🔍 統計計算関数 ---
 def calc_stats(df, group_col):
     res = df.groupby(group_col).agg(
         出走回数=(group_col, 'count'),
@@ -111,45 +111,47 @@ if df.empty:
     st.warning("⚠️ 条件に合うデータが0件です。")
     st.stop()
 
-st.title(f"🚀 東京 {baba_input}{dist}m 分析（{len(df)}件）")
+st.title(f"🚀 分析結果（{len(df)}件）")
 
-# 4大指標のタブ表示
 tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
 with tab1:
-    st.subheader("馬番別期待値")
+    st.subheader("馬番別：単勝回収率")
     s1 = calc_stats(df, '馬番')
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='馬番', y='単勝回収率', data=s1, ax=ax, palette="coolwarm")
-    ax.axhline(100, color='red', linestyle='--')
+    sns.barplot(x='馬番', y='単勝回収率', data=s1, ax=ax, palette="RdYlGn")
+    ax.axhline(100, color='black', linestyle='--')
     st.pyplot(fig)
     st.dataframe(s1.sort_values('単勝回収率', ascending=False))
 
 with tab2:
-    st.subheader("騎手別期待値（上位20名）")
+    st.subheader("騎手別：勝率上位10名")
     s2 = calc_stats(df, '騎手')
-    s2 = s2.sort_values('出走回数', ascending=False).head(20)
+    # 出走回数5回以上の騎手に限定（データの信頼性のため）
+    s2 = s2[s2['出走回数'] >= 5].sort_values('勝率', ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r")
+    sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'])
     plt.xticks(rotation=45)
     st.pyplot(fig)
-    st.dataframe(s2.sort_values('単勝回収率', ascending=False))
+    st.dataframe(s2)
 
 with tab3:
-    st.subheader("人気別信頼度")
+    st.subheader("人気別：複勝率（1番人気〜10番人気）")
     s3 = calc_stats(df, '人気')
+    s3 = s3[s3['人気'] <= 10].sort_values('人気')
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.lineplot(x='人気', y='複勝率', data=s3, marker='o', color='green')
+    sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r")
     st.pyplot(fig)
     st.dataframe(s3)
 
 with tab4:
-    st.subheader("父馬別期待値（上位20名）")
+    st.subheader("父馬別：単勝回収率上位10名")
     s4 = calc_stats(df, '父馬名')
-    s4 = s4.sort_values('出走回数', ascending=False).head(20)
+    # 出走回数3回以上の父馬に限定
+    s4 = s4[s4['出走回数'] >= 3].sort_values('単勝回収率', ascending=False).head(10)
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="autumn")
-    ax.axhline(100, color='blue', linestyle='--')
+    sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'])
+    ax.axhline(100, color='red', linestyle='--')
     plt.xticks(rotation=45)
     st.pyplot(fig)
-    st.dataframe(s4.sort_values('単勝回収率', ascending=False))
+    st.dataframe(s4)
