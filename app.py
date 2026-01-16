@@ -82,63 +82,74 @@ if st.sidebar.button("【4大指標 統計を確認する】"):
 
 st.sidebar.markdown("---")
 st.sidebar.header("3. 気になる馬情報")
-# (3の詳細は後ほど追加)
 st.sidebar.header("4. 期待値シミュレーター")
 
-# --- 🔍 データ取得 ---
-def load_filtered_data(b_val, d_val, extra_sql, t_sql, c_sql):
-    conn = sqlite3.connect(DB_FILE)
-    query = f"""
-    SELECT * FROM race_results 
-    WHERE 場所 LIKE '%東京%' AND 馬場 = '{b_val}' AND 距離 = {d_val} 
-    {extra_sql} {t_sql} {c_sql}
-    """
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df
+# --- 🔍 統計計算用関数 ---
+def calc_stats(df, group_col):
+    res = df.groupby(group_col).agg(
+        出走回数=(group_col, 'count'),
+        勝数=('確定着順', lambda x: (x == 1).sum()),
+        複勝数=('確定着順', lambda x: (x <= 3).sum()),
+        単勝回収計=('単勝オッズ', lambda x: df.loc[x.index[df.loc[x.index, '確定着順'] == 1], '単勝オッズ'].sum() * 100)
+    ).reset_index()
+    res['勝率'] = (res['勝数'] / res['出走回数'] * 100).round(1)
+    res['複勝率'] = (res['複勝数'] / res['出走回数'] * 100).round(1)
+    res['単勝回収率'] = (res['単勝回収計'] / (res['出走回数'] * 100)).round(1)
+    return res
 
-# --- 👉 右側：メイン表示エリア (統計・グラフ) ---
+# --- 👉 右側：メイン表示エリア ---
 if "mode" not in st.session_state:
     st.info("👈 左側のボタンを押すと、分析結果が表示されます。")
     st.stop()
 
-df = load_filtered_data(baba_val, dist, filter_query, time_sql, class_sql)
+conn = sqlite3.connect(DB_FILE)
+query = f"SELECT * FROM race_results WHERE 場所 LIKE '%東京%' AND 馬場 = '{baba_val}' AND 距離 = {dist} {filter_query} {time_sql} {class_sql}"
+df = pd.read_sql(query, conn)
+conn.close()
 
 if df.empty:
-    st.warning("⚠️ 条件に合うデータが0件です。条件を広げてみてください。")
+    st.warning("⚠️ 条件に合うデータが0件です。")
     st.stop()
 
-# --- 📊 統計計算 ---
-st.title(f"📊 抽出結果: {len(df)}件")
+st.title(f"🚀 東京 {baba_input}{dist}m 分析（{len(df)}件）")
 
-# 1. 馬番別の勝率・回収率などを計算
-stats = df.groupby('馬番').agg(
-    出走回数=('馬番', 'count'),
-    勝数=('確定着順', lambda x: (x == 1).sum()),
-    連対数=('確定着順', lambda x: (x <= 2).sum()),
-    複勝数=('確定着順', lambda x: (x <= 3).sum()),
-    単勝回収計=('単勝オッズ', lambda x: df.loc[x.index[df.loc[x.index, '確定着順'] == 1], '単勝オッズ'].sum() * 100)
-).reset_index()
+# 4大指標のタブ表示
+tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
-stats['勝率'] = (stats['勝数'] / stats['出走回数'] * 100).round(1)
-stats['複勝率'] = (stats['複勝数'] / stats['出走回数'] * 100).round(1)
-stats['単勝回収率'] = (stats['単勝回収計'] / (stats['出走回数'] * 100)).round(1)
-
-# --- 📈 グラフ表示 ---
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("📌 馬番別：勝率 (%)")
-    fig, ax = plt.subplots()
-    sns.barplot(x='馬番', y='勝率', data=stats, ax=ax, palette="viridis")
+with tab1:
+    st.subheader("馬番別期待値")
+    s1 = calc_stats(df, '馬番')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    sns.barplot(x='馬番', y='単勝回収率', data=s1, ax=ax, palette="coolwarm")
+    ax.axhline(100, color='red', linestyle='--')
     st.pyplot(fig)
+    st.dataframe(s1.sort_values('単勝回収率', ascending=False))
 
-with col2:
-    st.subheader("📌 馬番別：単勝回収率 (%)")
-    fig, ax = plt.subplots()
-    sns.barplot(x='馬番', y='単勝回収率', data=stats, ax=ax, palette="magma")
-    ax.axhline(100, color='red', linestyle='--') # 100%ライン
+with tab2:
+    st.subheader("騎手別期待値（上位20名）")
+    s2 = calc_stats(df, '騎手')
+    s2 = s2.sort_values('出走回数', ascending=False).head(20)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r")
+    plt.xticks(rotation=45)
     st.pyplot(fig)
+    st.dataframe(s2.sort_values('単勝回収率', ascending=False))
 
-st.subheader("📋 詳細統計データ")
-st.dataframe(stats.sort_values('勝率', ascending=False))
+with tab3:
+    st.subheader("人気別信頼度")
+    s3 = calc_stats(df, '人気')
+    fig, ax = plt.subplots(figsize=(10, 4))
+    sns.lineplot(x='人気', y='複勝率', data=s3, marker='o', color='green')
+    st.pyplot(fig)
+    st.dataframe(s3)
+
+with tab4:
+    st.subheader("父馬別期待値（上位20名）")
+    s4 = calc_stats(df, '父馬名')
+    s4 = s4.sort_values('出走回数', ascending=False).head(20)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="autumn")
+    ax.axhline(100, color='blue', linestyle='--')
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+    st.dataframe(s4.sort_values('単勝回収率', ascending=False))
