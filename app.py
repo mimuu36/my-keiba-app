@@ -38,50 +38,62 @@ def load_data(baba, dist, season):
     conn.close()
     return df
 
-# --- 👈 左側：メニュー（サイドバー） ---
+# --- 👈 左側：メニュー ---
 st.sidebar.header("📊 分析条件設定")
 baba = st.sidebar.selectbox("馬場", ["芝", "ダート"])
 dist = st.sidebar.selectbox("距離", [1300, 1400, 1600, 1800, 2000, 2100, 2400], index=2)
 season = st.sidebar.selectbox("季節", ["冬 (1-2月)", "春 (4-6月)", "秋 (10-11月)"])
 
-# --- 👉 右側：メイン表示エリア ---
 df = load_data(baba, dist, season)
 
 if not df.empty:
-    # 列名補正
-    id_col = 'レースID' if 'レースID' in df.columns else 'RaceID'
-    chakujun_col = '確定着順' if '確定着順' in df.columns else '着順'
+    # --- 自動列名判定ロジック ---
+    # 列名に特定の文字が含まれているものを探す
+    def find_col(possible_names, default_idx):
+        for name in df.columns:
+            if any(p in str(name) for p in possible_names):
+                return name
+        return df.columns[default_idx]
+
+    id_col = find_col(['ID', 'id', 'レース', 'Race'], 0)
+    chakujun_col = find_col(['着順', '着', 'Result', 'rank'], 1)
+    waku_col = find_col(['枠', 'Bracket'], 2)
+    ninki_col = find_col(['人気', 'Pop'], 3)
+    umaban_col = find_col(['馬番', 'Num'], 4)
     
-    st.success(f"✅ 解析対象: {df[id_col].nunique()} レース / {len(df)} 頭のデータを抽出しました")
+    # データの数値化（エラー対策）
+    df[chakujun_col] = pd.to_numeric(df[chakujun_col], errors='coerce')
+    df[waku_col] = pd.to_numeric(df[waku_col], errors='coerce')
+    df[ninki_col] = pd.to_numeric(df[ninki_col], errors='coerce')
+
+    st.success(f"✅ 解析対象: {df[id_col].nunique()} レース / {len(df)} 頭")
 
     # --- Section 1: 枠順別分析 ---
     st.header("📍 Section 1: 枠順の有利不利")
-    waku_stats = df.groupby('枠番')[chakujun_col].apply(lambda x: (pd.to_numeric(x, errors='coerce') <= 3).mean() * 100)
+    waku_stats = df.groupby(waku_col)[chakujun_col].apply(lambda x: (x <= 3).mean() * 100)
     fig1, ax1 = plt.subplots(figsize=(10, 4))
     sns.barplot(x=waku_stats.index, y=waku_stats.values, palette="tab10", ax=ax1)
     ax1.set_ylabel("複勝率 (%)")
     st.pyplot(fig1)
 
-    # --- Section 2: 人気と実力の乖離 ---
+    # --- Section 2: 人気別信頼度 ---
     st.header("🎯 Section 2: 人気別信頼度")
-    pop_stats = df.groupby('人気')[chakujun_col].apply(lambda x: (pd.to_numeric(x, errors='coerce') <= 3).mean() * 100).head(10)
+    pop_stats = df.groupby(ninki_col)[chakujun_col].apply(lambda x: (x <= 3).mean() * 100).head(10)
     fig2, ax2 = plt.subplots(figsize=(10, 4))
     sns.lineplot(x=pop_stats.index, y=pop_stats.values, marker='o', color='red', ax=ax2)
-    ax2.set_xticks(range(1, 11))
+    ax2.set_xticks(range(1, min(11, len(pop_stats)+1)))
     ax2.set_ylabel("複勝率 (%)")
     st.pyplot(fig2)
 
-    # --- Section 3: 脚質・展開（馬番別傾向） ---
+    # --- Section 3: 馬番別傾向 ---
     st.header("🏃 Section 3: 馬番別・コース傾向")
-    umaban_stats = df[df[chakujun_col] <= 3].groupby('馬番').size()
     fig3, ax3 = plt.subplots(figsize=(12, 4))
-    sns.countplot(x='馬番', data=df[df[chakujun_col] <= 3], palette="Blues_r", ax=ax3)
-    ax3.set_title("3着以内に入った馬番の分布")
+    sns.countplot(x=umaban_col, data=df[df[chakujun_col] <= 3], palette="Blues_r", ax=ax3)
     st.pyplot(fig3)
 
-    # --- Section 4: 詳細データ一覧 ---
-    st.header("📑 Section 4: 生データ（上位入線馬）")
-    st.dataframe(df[df[chakujun_col] <= 3].sort_values(by=[id_col, chakujun_col]), height=400)
+    # --- Section 4: データ一覧 ---
+    st.header("📑 Section 4: 生データ")
+    st.dataframe(df.head(100), height=400)
 
 else:
-    st.warning("⚠️ 指定された条件（馬場・距離・季節）に該当するデータがデータベース内に見つかりません。")
+    st.warning("⚠️ 該当データがありません。条件を変えてみてください。")
