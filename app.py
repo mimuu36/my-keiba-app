@@ -6,7 +6,7 @@ import seaborn as sns
 import japanize_matplotlib
 from datetime import date, datetime
 
-# --- 🔒 認証機能 (維持) ---
+# --- 🔒 認証機能 ---
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["MY_PASSWORD"]:
@@ -29,7 +29,6 @@ if not check_password():
 # --- 🐎 アプリ設定 ---
 st.set_page_config(page_title="東京競馬分析WS", layout="wide")
 
-# データベースの列名を調べる関数
 def get_col_names():
     conn = sqlite3.connect('keiba_data.db')
     cursor = conn.execute("SELECT * FROM race_results LIMIT 1")
@@ -41,7 +40,6 @@ def get_col_names():
 st.sidebar.title("🎮 操作パネル")
 cols = get_col_names()
 
-# 実際の列名を特定
 date_col = next((c for c in cols if c in ['日付', '年月日', 'date', 'Date']), cols[0])
 month_col = next((c for c in cols if c in ['月', 'month', 'Month']), None)
 
@@ -51,18 +49,18 @@ range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節�
 
 filter_query = ""
 if range_type == "日付範囲で指定":
+    # 2020年（元データの開始）から設定
     start_date = st.sidebar.date_input("開始日", date(2020, 1, 1))
     end_date = st.sidebar.date_input("終了日", date(2025, 12, 31))
     filter_query = f"AND {date_col} >= '{start_date}' AND {date_col} <= '{end_date}'"
 else:
-    # 季節指定のフル仕様
     season = st.sidebar.selectbox("対象シーズン", ["春 (4-6月)", "秋 (10-11月)", "冬 (1-2月)"])
-    years_back = st.sidebar.slider("過去何年分を対象にするか", 1, 10, 5)
+    # 2020-2025年なので、遡り最大は6年に修正
+    years_back = st.sidebar.slider("過去何年分を対象にするか", 1, 6, 3)
     
     m_dict = {"冬 (1-2月)": "1,2", "春 (4-6月)": "4,5,6", "秋 (10-11月)": "10,11"}
-    
-    # 現在の年から遡って日付条件を作る
-    current_year = datetime.now().year
+    # 2026年1月現在から計算
+    current_year = 2026 
     start_year = current_year - years_back
     
     if month_col:
@@ -101,7 +99,7 @@ if "mode" not in st.session_state:
 df = load_filtered_data(baba, dist, filter_query)
 
 if not df.empty:
-    st.success(f"✅ {len(df)}件のデータを抽出しました（{range_type}）")
+    st.success(f"✅ {len(df)}件のデータを抽出しました")
     st.dataframe(df.head(50))
 else:
     st.warning("⚠️ 条件に合うデータが0件です。")
