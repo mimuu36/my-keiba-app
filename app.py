@@ -6,6 +6,7 @@ import seaborn as sns
 import japanize_matplotlib
 from datetime import date
 import os
+import matplotlib.colors as mcolors
 
 # --- 🔒 認証機能 (維持) ---
 def check_password():
@@ -33,7 +34,6 @@ DB_FILE = 'keiba_data.db'
 # --- 👈 左側：操作パネル (完全固定) ---
 st.sidebar.title("🎮 操作パネル")
 
-# 1. 過去データの参照範囲
 st.sidebar.header("1. 過去データの参照範囲")
 range_type = st.sidebar.radio("指定方法", ["日付範囲で指定", "季節で指定"])
 
@@ -50,7 +50,6 @@ else:
     start_year_2digit = 26 - years_back
     filter_query = f"AND 年 >= {start_year_2digit} AND 月 IN ({m_dict[season]})"
 
-# 2. レース条件
 st.sidebar.header("2. レース条件")
 baba_input = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 baba_val = "ダ" if baba_input == "ダート" else "芝"
@@ -83,8 +82,6 @@ if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
 
 st.sidebar.markdown("---")
-
-# 3. 気になる馬情報 (ここを実装！)
 st.sidebar.header("3. 気になる馬情報")
 target_horse_num = st.sidebar.number_input("気になる馬の馬番", 1, 18, 1)
 highlight_on = st.sidebar.toggle("強調表示をONにする", value=False)
@@ -104,17 +101,15 @@ def calc_stats(df, group_col):
     res['単勝回収率'] = (res['単勝回収計'] / (res['出走回数'] * 100)).round(1)
     return res
 
-# グラフラベル用
-def add_labels(ax, suffix="%"):
+def add_labels_inside(ax, suffix="%"):
     for p in ax.patches:
         height = p.get_height()
         if height > 0:
+            # 棒の高さの半分（中心）に配置
             ax.annotate(f'{height:.1f}{suffix}', 
                         (p.get_x() + p.get_width() / 2., height / 2), 
-                        ha = 'center', va = 'center', 
-                        xytext = (0, 0), 
-                        textcoords = 'offset points',
-                        color='white', fontweight='bold', fontsize=10)
+                        ha='center', va='center', 
+                        color='white', fontweight='bold', fontsize=9)
 
 # --- 👉 右側：メイン表示エリア ---
 if "mode" not in st.session_state:
@@ -132,33 +127,44 @@ if df.empty:
 
 st.title(f"🚀 期待値分析（{len(df)}件）")
 
-# 強調表示用のカラーパレット作成
-def get_palette(data, col_name, target_val, base_palette):
-    if not highlight_on:
-        return base_palette
-    return ['#FF4B4B' if val == target_val else '#CCCCCC' for val in data[col_name]]
-
 tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人気信頼度", "🧬 父馬別"])
 
 with tab1:
-    st.subheader("馬番別：複勝期待値（3着内率）")
+    st.subheader("馬番期待値")
     s1 = calc_stats(df, '馬番')
     avg_fukusho = (df['確定着順'] <= 3).mean() * 100
     
-    # 馬番別の色は、強調ONなら対象馬番だけ赤くする
-    pal1 = ['#FF4B4B' if x == target_horse_num and highlight_on else '#5DADE2' for x in s1['馬番']]
+    # --- 🎨 期待値に応じた色分けロジック ---
+    # 赤(高) -> オレンジ -> 黄 -> 緑 -> 青 -> 灰(低) のグラデーション
+    cmap = mcolors.LinearSegmentedColormap.from_list("race", ["#808080", "#3498DB", "#2ECC71", "#F1C40F", "#E67E22", "#E74C3C"])
+    norm = mcolors.Normalize(vmin=s1['複勝率'].min(), vmax=s1['複勝率'].max())
     
+    # 強調表示がONの場合は指定馬以外をグレーアウト、OFFなら期待値カラー
+    if highlight_on:
+        colors = ['#E74C3C' if x == target_horse_num else '#DCDCDC' for x in s1['馬番']]
+    else:
+        colors = [cmap(norm(val)) for val in s1['複勝率']]
+
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=pal1)
+    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors)
     ax.axhline(avg_fukusho, color='blue', linestyle='--', label='全体平均')
     ax.set_ylabel("複勝率 (%)")
-    add_labels(ax)
+    add_labels_inside(ax)
     st.pyplot(fig)
     
+    # --- 補足説明ロジック ---
+    target_row = s1.sort_values('複勝率', ascending=False).iloc[0]
+    best_gate = int(target_row['馬番'])
+    best_rate = target_row['複勝率']
+    
+    st.markdown(f"💡 **この条件だと {best_gate}番（{best_rate}%）が狙い！** (全体平均: {avg_fukusho:.1f}%)")
+    
     if highlight_on:
-        target_stat = s1[s1['馬番'] == target_horse_num]
-        if not target_stat.empty:
-            st.info(f"🐎 指定した馬番 {target_horse_num} の複勝率は **{target_stat['複勝率'].values[0]}%** です（全体平均: {avg_fukusho:.1f}%）")
+        user_horse = s1[s1['馬番'] == target_horse_num]
+        if not user_horse.empty:
+            diff = user_horse['複勝率'].values[0] - avg_fukusho
+            mark = "🟢 有利" if diff > 0 else "△ 慎重に"
+            st.info(f"🐎 気になる馬({target_horse_num}番)の期待値: {user_horse['複勝率'].values[0]}% [{mark}]")
 
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
@@ -167,7 +173,7 @@ with tab2:
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'])
     ax.set_ylabel("勝率 (%)")
-    add_labels(ax)
+    add_labels_inside(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
@@ -178,7 +184,7 @@ with tab3:
     fig, ax = plt.subplots(figsize=(10, 4))
     sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r")
     ax.set_ylabel("複勝率 (%)")
-    add_labels(ax)
+    add_labels_inside(ax)
     st.pyplot(fig)
 
 with tab4:
@@ -189,6 +195,6 @@ with tab4:
     sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'])
     ax.axhline(100, color='red', linestyle='--')
     ax.set_ylabel("単勝回収率 (%)")
-    add_labels(ax)
+    add_labels_inside(ax)
     plt.xticks(rotation=45)
     st.pyplot(fig)
