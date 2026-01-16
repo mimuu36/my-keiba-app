@@ -51,11 +51,9 @@ else:
     filter_query = f"AND 年 >= {start_year_2digit} AND 月 IN ({m_dict[season]})"
 
 st.sidebar.header("2. レース条件")
-# 馬場種別（芝 or ダート）
 baba_input = st.sidebar.selectbox("馬場種別", ["芝", "ダート"])
 baba_val = "ダ" if baba_input == "ダート" else "芝"
 
-# 【復旧】馬場状態（良、稍重、重、不良）
 baba_condition = st.sidebar.multiselect("馬場状態", ["良", "稍重", "重", "不良"], default=["良", "稍重", "重", "不良"])
 cond_sql = ""
 if baba_condition:
@@ -114,7 +112,7 @@ def calc_stats(df, group_col):
 def add_smart_labels(ax, suffix="%"):
     for p in ax.patches:
         height = p.get_height()
-        if height > 0:
+        if height > 0 and not pd.isna(height):
             va = 'bottom' if height < 5 else 'top'
             y_pos = height + 0.3 if height < 5 else height - 0.3
             txt = ax.annotate(f'{height:.1f}{suffix}', 
@@ -129,7 +127,6 @@ if "mode" not in st.session_state:
     st.stop()
 
 conn = sqlite3.connect(DB_FILE)
-# 【修正】SQLに cond_sql (馬場状態) を追加
 query = f"SELECT * FROM race_results WHERE 場所 LIKE '%東京%' AND 馬場 = '{baba_val}' {cond_sql} AND 距離 = {dist} {filter_query} {time_sql} {class_sql}"
 df = pd.read_sql(query, conn)
 conn.close()
@@ -144,65 +141,81 @@ tab1, tab2, tab3, tab4 = st.tabs(["🔢 馬番別", "🏇 騎手別", "🎯 人�
 with tab1:
     st.subheader("馬番期待値")
     s1 = calc_stats(df, '馬番')
-    avg_f = (df['確定着順'] <= 3).mean() * 100
-    s1_sorted = s1.sort_values('複勝率', ascending=False)
-    top_5_gate = s1_sorted.head(5)['馬番'].tolist()
-    
-    colors = []
-    for gate in s1['馬番']:
-        if highlight_on:
-            colors.append('#E74C3C' if gate == target_horse_num else '#E5E7E9')
-        else:
-            if gate in top_5_gate:
-                rank = top_5_gate.index(gate) + 1
-                if rank == 1: colors.append("#E74C3C") 
-                elif rank <= 3: colors.append("#E67E22")
-                else: colors.append("#F1C40F") 
+    if not s1.empty:
+        avg_f = (df['確定着順'] <= 3).mean() * 100
+        v_max = s1['複勝率'].max()
+        s1_sorted = s1.sort_values('複勝率', ascending=False)
+        top_5_gate = s1_sorted.head(5)['馬番'].tolist()
+        
+        colors = []
+        for gate in s1['馬番']:
+            if highlight_on:
+                colors.append('#E74C3C' if gate == target_horse_num else '#E5E7E9')
             else:
-                colors.append("#87CEEB")
+                if gate in top_5_gate:
+                    rank = top_5_gate.index(gate) + 1
+                    if rank == 1: colors.append("#E74C3C") 
+                    elif rank <= 3: colors.append("#E67E22")
+                    else: colors.append("#F1C40F") 
+                else:
+                    colors.append("#87CEEB")
 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors, edgecolor='white', linewidth=0.5)
-    ax.axhline(avg_f, color='blue', linestyle='--', alpha=0.6, linewidth=1.5)
-    ax.set_ylabel("複勝率 (%)")
-    ax.set_ylim(0, s1['複勝率'].max() * 1.15)
-    add_smart_labels(ax)
-    st.pyplot(fig)
-    best_row = s1_sorted.iloc[0]
-    st.markdown(f"💡 **この条件だと {int(best_row['馬番'])}番（{best_row['複勝率']}%）が狙い！** (平均: {avg_f:.1f}%)")
+        fig, ax = plt.subplots(figsize=(10, 4))
+        sns.barplot(x='馬番', y='複勝率', data=s1, ax=ax, palette=colors, edgecolor='white', linewidth=0.5)
+        ax.axhline(avg_f, color='blue', linestyle='--', alpha=0.6, linewidth=1.5)
+        ax.set_ylabel("複勝率 (%)")
+        if v_max > 0: ax.set_ylim(0, v_max * 1.25)
+        add_smart_labels(ax)
+        st.pyplot(fig)
+        best_row = s1_sorted.iloc[0]
+        st.markdown(f"💡 **この条件だと {int(best_row['馬番'])}番（{best_row['複勝率']}%）が狙い！** (平均: {avg_f:.1f}%)")
+    else:
+        st.write("データがありません。")
 
 with tab2:
     st.subheader("騎手別：勝率（上位10名）")
     s2 = calc_stats(df, '騎手')
     s2 = s2[s2['出走回数'] >= 5].sort_values('勝率', ascending=False).head(10)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'], edgecolor='white')
-    ax.set_ylabel("勝率 (%)")
-    ax.set_ylim(0, s2['勝率'].max() * 1.15)
-    add_smart_labels(ax)
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
+    if not s2.empty:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        sns.barplot(x='騎手', y='勝率', data=s2, ax=ax, palette="Blues_r", order=s2['騎手'], edgecolor='white')
+        ax.set_ylabel("勝率 (%)")
+        v_max_s2 = s2['勝率'].max()
+        if not pd.isna(v_max_s2) and v_max_s2 > 0: ax.set_ylim(0, v_max_s2 * 1.25)
+        add_smart_labels(ax)
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+    else:
+        st.info("出走回数5回以上の騎手データがありません。")
 
 with tab3:
     st.subheader("人気別：複勝率（信頼度）")
     s3 = calc_stats(df, '人気')
     s3 = s3[s3['人気'] <= 10].sort_values('人気')
-    fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r", edgecolor='white')
-    ax.set_ylabel("複勝率 (%)")
-    ax.set_ylim(0, s3['複勝率'].max() * 1.15)
-    add_smart_labels(ax)
-    st.pyplot(fig)
+    if not s3.empty:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        sns.barplot(x='人気', y='複勝率', data=s3, ax=ax, palette="Greens_r", edgecolor='white')
+        ax.set_ylabel("複勝率 (%)")
+        v_max_s3 = s3['複勝率'].max()
+        if not pd.isna(v_max_s3) and v_max_s3 > 0: ax.set_ylim(0, v_max_s3 * 1.25)
+        add_smart_labels(ax)
+        st.pyplot(fig)
+    else:
+        st.write("データがありません。")
 
 with tab4:
     st.subheader("父馬別：単勝回収率上位10名")
     s4 = calc_stats(df, '父馬名')
     s4 = s4[s4['出走回数'] >= 3].sort_values('単勝回収率', ascending=False).head(10)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'], edgecolor='white')
-    ax.axhline(100, color='red', linestyle='--', alpha=0.5)
-    ax.set_ylabel("単勝回収率 (%)")
-    ax.set_ylim(0, s4['単勝回収率'].max() * 1.15)
-    add_smart_labels(ax)
-    plt.xticks(rotation=45)
-    st.pyplot(fig)
+    if not s4.empty:
+        fig, ax = plt.subplots(figsize=(10, 4))
+        sns.barplot(x='父馬名', y='単勝回収率', data=s4, ax=ax, palette="YlOrBr_r", order=s4['父馬名'], edgecolor='white')
+        ax.axhline(100, color='red', linestyle='--', alpha=0.5)
+        ax.set_ylabel("単勝回収率 (%)")
+        v_max_s4 = s4['単勝回収率'].max()
+        if not pd.isna(v_max_s4) and v_max_s4 > 0: ax.set_ylim(0, v_max_s4 * 1.25)
+        add_smart_labels(ax)
+        plt.xticks(rotation=45)
+        st.pyplot(fig)
+    else:
+        st.info("出走回数3回以上の父馬データがありません。")
