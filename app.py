@@ -41,11 +41,12 @@ def get_real_columns():
     c_col = next((c for c in cols if "条件" in c or "クラス" in c or "class" in c.lower()), "条件")
     b_col = next((c for c in cols if "馬場" in c or "surface" in c.lower()), "馬場")
     p_col = next((c for c in cols if "場所" in c or "site" in c.lower()), "場所")
-    return d_col, m_col, r_col, c_col, b_col, p_col
+    dist_col = next((c for c in cols if "距離" in c or "dist" in c.lower()), "距離")
+    return d_col, m_col, r_col, c_col, b_col, p_col, dist_col
 
-d_col, m_col, r_col, c_col, b_col, p_col = get_real_columns()
+d_col, m_col, r_col, c_col, b_col, p_col, dist_col = get_real_columns()
 
-# --- 👈 左側：サイドバー ---
+# --- 👈 左側：サイドバー（見た目維持） ---
 st.sidebar.title("🎮 操作パネル")
 
 # 1. 過去データの参照範囲
@@ -83,16 +84,15 @@ else:
     target_r = st.sidebar.number_input("レース番号(R)", 1, 12, 11)
     time_sql = f"AND CAST({r_col} AS INTEGER) = {target_r}"
 
-# --- クラスSQLの修正（全クラス時は空にする） ---
 class_sql = ""
 if race_class == "新馬・未勝利":
     class_sql = f"AND ({c_col} LIKE '%新馬%' OR {c_col} LIKE '%未勝利%')"
 elif race_class == "1勝クラス":
-    class_sql = f"AND ({c_col} LIKE '%1勝%' OR {c_col} LIKE '%500万%')" # 旧呼称も考慮
+    class_sql = f"AND ({c_col} LIKE '%1勝%' OR {c_col} LIKE '%500万%')"
 elif race_class == "2勝・3勝クラス":
     class_sql = f"AND ({c_col} LIKE '%2勝%' OR {c_col} LIKE '%3勝%' OR {c_col} LIKE '%1000万%' OR {c_col} LIKE '%1600万%')"
 elif race_class == "オープン・重賞":
-    class_sql = f"AND ({c_col} LIKE '%オープン%' OR {c_col} LIKE '%OP%' OR {c_col} LIKE '%重賞%' OR {c_col} LIKE '%G1%' OR {c_col} LIKE '%G2%' OR {c_col} LIKE '%G3%')"
+    class_sql = f"AND ({c_col} LIKE '%オープン%' OR {c_col} LIKE '%OP%' OR {c_col} LIKE '%重賞%')"
 
 if st.sidebar.button("【4大指標 統計を確認する】"):
     st.session_state.mode = "stats"
@@ -101,22 +101,22 @@ st.sidebar.markdown("---")
 st.sidebar.header("3. 気になる馬情報")
 st.sidebar.header("4. 期待値シミュレーター")
 
-# --- 🔍 データ取得 ---
+# --- 🔍 データ取得ロジック（柔軟性MAX） ---
 def load_filtered_data(baba_val, dist_val, extra_sql, t_sql, c_sql):
     conn = sqlite3.connect(DB_FILE)
+    # 距離と馬場をLIKE検索（部分一致）にして、より広く拾えるように修正
     query = f"""
     SELECT * FROM race_results 
     WHERE {p_col} LIKE '%東京%' 
-    AND {b_col} LIKE '{baba_val}%' 
-    AND 距離 = {dist_val} 
+    AND {b_col} LIKE '%{baba_val}%' 
+    AND {dist_col} LIKE '%{dist_val}%' 
     {extra_sql} {t_sql} {c_sql}
     """
     try:
         df = pd.read_sql(query, conn)
-        return df
+        return df, query
     except Exception as e:
-        st.error("データ取得エラー")
-        return pd.DataFrame()
+        return pd.DataFrame(), str(e)
     finally:
         conn.close()
 
@@ -124,13 +124,15 @@ if "mode" not in st.session_state:
     st.info("👈 左側のボタンを押すと、分析結果が表示されます。")
     st.stop()
 
-df = load_filtered_data(baba, dist, filter_query, time_sql, class_sql)
+df, sql_debug = load_filtered_data(baba, dist, filter_query, time_sql, class_sql)
 
 if not df.empty:
     st.success(f"✅ {len(df)}件のデータを抽出しました")
     st.dataframe(df.head(50))
 else:
-    # どこで条件が厳しすぎたかヒントを出す
-    st.warning("条件に合うデータが0件です。")
-    if race_class != "全クラス":
-        st.write("💡 『レースクラス』を『全クラス』にすると表示されますか？")
+    st.warning("⚠️ ヒットしません。以下が現在のDBの生データ（最初の5件）です。列名と内容を確認してください。")
+    conn = sqlite3.connect(DB_FILE)
+    raw_df = pd.read_sql(f"SELECT * FROM race_results LIMIT 5", conn)
+    conn.close()
+    st.table(raw_df)
+    st.write("実行されたSQL:", sql_debug)
